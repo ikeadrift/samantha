@@ -45,8 +45,10 @@ end
 local function start_recording()
 	reset_loop()
 	softcut.rec(1, 1)
+	playing = false
 	recording = true
 	start_time = util.time()
+	_norns.level_monitor(1)
 end
 
 
@@ -54,9 +56,77 @@ local function stop_recording()
 	params:set("loop_end", current_position)
 	softcut.rec(1,0)
 	softcut.position(1, 0)
-	recording = false
-	playing = true
 	softcut.play(1, 1)
+	playing = true
+	recording = false
+	recorded = true
+	if params:get("monitor_while_looping") == 1 then
+		_norns.level_monitor(0)
+	end
+end
+
+
+local function load_sample(file)
+  local chan, samples, rate = audio.file_info(file)
+  local sample_len = samples / rate
+  softcut.buffer_clear(1)
+  softcut.buffer_read_mono(file, 0, 0, -1, 1, 1)
+  set_loop_start(0)
+  set_loop_end(sample_len)
+	recorded = true
+end
+
+
+function write_buffer(name)
+  -- saves buffer as a mono file in /home/we/dust/audio/tape
+  if name then
+    last_saved_name = name
+    local file_path = "/home/we/dust/audio/tape/" .. name .. ".wav"
+    local loop_start = params:get("loop_start")
+    local loop_end = params:get("loop_end")
+
+    softcut.buffer_write_mono(file_path, loop_start, loop_end + .12, 1)
+    print("Buffer saved as " .. file_path)
+    saved_time = util.time()
+  end
+end
+
+
+local function update_positions(voice,position)
+  current_position = position
+end
+
+
+local function quantize(s, e)
+	if params:get("quantize_div") ~= 1 then
+		local loop_start = params:get("loop_start")
+		-- local loop_len = params:get("loop_end") - loop_start
+		local loop_len = e - s
+		local q_beat_len = clock.get_beat_sec() * params:get("quantize_div")
+		local q_beat_count = loop_len // q_beat_len
+		
+		if math.abs(loop_len - (q_beat_len * q_beat_count)) > math.abs(loop_len - (q_beat_len * (q_beat_count + 1) )) then
+			q_beat_count = q_beat_count + 1
+		end
+
+		if q_beat_count~=0 then
+			params:set("loop_end", loop_start + (q_beat_len * q_beat_count))
+			quantized_time = util.time()
+		else
+			print("loop too short for quantization settings")
+			quantized_err_time = util.time()
+		end
+	end
+end
+
+
+function increment_name(name)
+	local n = name:find("%-%d+$")
+	if n then
+		return name:sub(1, n) .. tonumber(name:sub(n + 1)) + 1
+	else
+		return ''
+	end
 end
 
 
@@ -99,13 +169,15 @@ function init()
 
   -- load a sample
   params:add_file("sample", "sample")
-  -- params:set_action("sample", function(file) load_sample(file) end)
+  params:set_action("sample", function(file) load_sample(file) end)
   -- sample start controls
   params:add_control("loop_start", "loop start", controlspec.new(0.0, 349.99, "lin", .01, 0, "secs"))
-  -- params:set_action("loop_start", function(x) set_loop_start(x) end)
+  params:set_action("loop_start", function(x) set_loop_start(x) end)
   -- sample end controls
   params:add_control("loop_end", "loop end", controlspec.new(.01, 350, "lin", .01, 350, "secs"))
-  -- params:set_action("loop_end", function(x) set_loop_end(x) end)
+  params:set_action("loop_end", function(x) set_loop_end(x) end)
+	-- line thru
+	params:add_option("monitor_while_looping", "always monitor", {"off", "on"}, 1)
 	
   -- quantize
   params:add_option('q_div', 'q div', {'off', '1/32', '1/16', '1/8', '1/4', '1/2', '1', '2', '4'}, 5)
@@ -170,7 +242,9 @@ function key(n, z)
 		if recording == false then
 			if alt then
 			  primed = true
-			  -- TODO: pause playback
+			  softcut.play(1, 0)
+			  playing = false
+			  _norns.level_monitor(1)
 			  armed_timer:start()
 			  p_input_level:start()
 			  alt = not alt
@@ -202,10 +276,14 @@ function key(n, z)
         if playing == true then
           softcut.play(1, 0)
           playing = false
+					_norns.level_monitor(1)
         else
           softcut.position(1, 0)
           softcut.play(1, 1)
           playing = true
+					if params:get("monitor_while_looping") == 1 then
+						_norns.level_monitor(0)
+					end
         end
       end
     end
@@ -217,7 +295,7 @@ end
 function enc(n, d)
   if alt then
 		if n == 1 then
-			params:delta("q_div", d)
+			params:delta("clock_tempo", d)
     elseif n == 2 then
       params:delta("input_trigger_amp", d)
     elseif n == 3 then
@@ -225,13 +303,7 @@ function enc(n, d)
     end
   else
     if n == 1 then
-			-- better way to combine?
-			-- todo: add check for quantization later
-			-- check to see if one parameter is at its highest possible value before changing either
-			-- or give up on this feature and edit BPM instead (easier lol)
-			
-			-- params:delta("loop_start", d * .005)
-			-- params:delta("loop_end", d * .005)
+      params:delta("q_div", d)
 		elseif n == 2 then
       params:delta("loop_start", d * .005)
     elseif n == 3 then
@@ -247,14 +319,22 @@ function redraw()
   screen.clear()
   screen.level(3)
   screen.move(screen_x_padding, screen_y_padding + 5)
-  screen.text(params:get("clock_tempo") ..  " BPM")
-  screen.move(128 - screen_x_padding, screen_y_padding + 5)
   if alt then
     screen.level(15)
   end
+  screen.text(params:get("clock_tempo") ..  " BPM")
+  screen.move(128 - screen_x_padding, screen_y_padding + 5)
+  screen.level(15)
+  if alt then
+    screen.level(3)
+  end
   screen.text_right("Q " .. params:string("q_div"))
   
-  screen.level(1)
+  if not recorded or recording then
+    screen.level(1)
+  else
+    screen.level(15)
+  end
   screen.rect(56, 14, 17, 17)
   screen.stroke()
   
@@ -273,12 +353,18 @@ function redraw()
     end
     screen.circle(64, screen_y_centered+1, 6)
     screen.fill()
-  elseif playing then
-    -- draw triangle
-  elseif paused then
-    -- draw bars
-  end
+	end
 
+  screen.move(64, screen_y_centered + 3)
+  
+  screen.level(3)
+  if recorded and playing then
+    screen.text_center("▶")
+  end
+  
+  if recorded and not playing then
+    screen.text_center("||")
+  end
 
   screen.level(3)
   screen.move(64, screen_y_centered + 21)
@@ -287,7 +373,7 @@ function redraw()
   elseif recording then
     screen.text_center("end : " .. string.format("%.2f", current_position))
   else
-    screen.text_center("todo: loop length")
+    screen.text_center(params:get("loop_end") - params:get("loop_start"))
   end
   
 
@@ -299,7 +385,12 @@ function redraw()
     -- quantize this
     screen.text_center("Q end : " .. string.format("%.2f", current_position))
   else
-    screen.text_center("todo: Q loop length")
+    if params:get("q_div") ~= 1 then
+      -- do the math to display correct length
+      screen.text_center("Q math")
+    else
+      screen.text_center("-")
+    end
   end
 
   
@@ -355,18 +446,22 @@ function redraw()
     screen.level(15)
     screen.text(string.format("%.2f", params:get("input_trigger_amp")))
     screen.move(128 - screen_x_padding, 51)
-    screen.text_right(params:string("auto_len"))
+      screen.text_right(params:string("auto_len"))
   else
-    if recorded then
+    if recording or recorded then
       screen.level(15)
-      screen.text("▶ " .. string.format("%.2f", params:get("loop_start")))
-      screen.move(120, 51)
-      screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◀")
+      screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
+      screen.move(128 - screen_x_padding, 51)
+      if recording then
+        screen.text_right(string.format("%.2f", string.format("%.2f", current_position)) .. " ◣")
+      else
+        screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◣")
+      end
     else
       screen.level(3)
-      screen.text("▶ -")
+      screen.text("◢ -")
      screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
-     screen.text_right("- ◀")
+     screen.text_right("- ◣")
     end
   end
   
