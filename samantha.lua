@@ -14,6 +14,7 @@ local current_position = 0
 local q_div_table = {nil, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4}
 local max_len_table = {nil, 0.5, 1, 2, 4, 6, 8}
 local max_len = nil
+local active_control_level = 3
 local last_saved_name = ''
 
 local screen_x_padding = 4
@@ -184,7 +185,7 @@ function init()
   -- params:set_action("q_div", function(x) quantize(x) end)
 
   -- max length
-  params:add_option('auto_len', "auto length", {'off', '1/2', '1', '2', '4', '6', '8'}, 1)
+  params:add_option('auto_len', "auto length", {'off', '1/2', '1', '2', '4', '8'}, 1)
   -- params:set_action("auto_len", function(x) set_max_len(x) end)
 
   -- input trigger db
@@ -304,9 +305,9 @@ function enc(n, d)
   else
     if n == 1 then
       params:delta("q_div", d)
-		elseif n == 2 then
+		elseif n == 2 and recorded then
       params:delta("loop_start", d * .005)
-    elseif n == 3 then
+    elseif n == 3 and recorded then
       params:delta("loop_end", d * .005)
     end
   end
@@ -330,6 +331,20 @@ function redraw()
   end
   screen.text_right("Q " .. params:string("q_div"))
   
+    -- input threshold visualizer
+  if alt then 
+    active_control_level = 15
+  else
+    active_control_level = 6
+  end
+  screen.level (1)
+  screen.rect(screen_x_padding, 14, 2, 26)
+  screen.fill()
+  
+  screen.level (active_control_level)
+  screen.rect(screen_x_padding - 1, 40 - math.floor(26 * params:get("input_trigger_amp")), 4, 1)
+  screen.fill()
+  
   if not recorded or recording then
     screen.level(1)
   else
@@ -338,7 +353,7 @@ function redraw()
   screen.rect(56, 14, 17, 17)
   screen.stroke()
   
-  
+   
   if recording or primed or not recorded then
     if recording then
       screen.level(15)
@@ -354,16 +369,54 @@ function redraw()
     screen.circle(64, screen_y_centered+1, 6)
     screen.fill()
 	end
+  
+  -- auto length visualizer
+  screen.level (1)
+  if params:get("auto_len") == 6 then
+    screen.level(active_control_level)
+  end
+  screen.rect(128 - screen_x_padding - 2, 14, 2, 8)
+  screen.fill()
+  if params:get("auto_len") == 5 then
+    screen.level(active_control_level)
+  end
+  screen.rect(128 - screen_x_padding - 2, 15 + 8, 2, 6)
+  screen.fill()
+  if params:get("auto_len") == 4 then
+    screen.level(active_control_level)
+  end
+  screen.rect(128 - screen_x_padding - 2, 15 + 8 + 1 + 6, 2, 4)
+  screen.fill()
+  if params:get("auto_len") == 3 then
+    screen.level(active_control_level)
+  end
+  screen.rect(128 - screen_x_padding - 2, 15 + 8 + 1 + 6 + 1 + 4, 2, 2)
+  screen.fill()
+  if params:get("auto_len") == 2 then
+    screen.level(active_control_level)
+  end
+  screen.rect(128 - screen_x_padding - 2, 15 + 8 + 1 + 6 + 1 + 4 + 1 + 2, 2, 2)
+  screen.fill()
+  
 
   screen.move(64, screen_y_centered + 3)
   
-  screen.level(3)
-  if recorded and playing then
-    screen.text_center("▶")
+  screen.level(15)
+  if recorded and playing and not primed then
+    screen.move(64-3, 18)
+    screen.line(64+4.5, 22)
+    screen.line(64-3, 26)
+    screen.close()
+    screen.fill()
+    -- screen.text_center("▶")
   end
   
-  if recorded and not playing then
-    screen.text_center("||")
+  if recorded and not playing and not primed then
+    screen.rect(64-3, 18, 2, 8)
+    screen.fill()
+    screen.rect(64+1, 18, 2, 8)
+    screen.fill()
+    -- screen.text_center("||")
   end
 
   screen.level(3)
