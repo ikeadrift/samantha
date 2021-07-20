@@ -186,7 +186,7 @@ function init()
 			primed = false
 		end
 	end
-	p_input_level.time = 0.02
+	p_input_level.time = 0.0001
 
   -- load a sample
   params:add_file("sample", "sample")
