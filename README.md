@@ -2,14 +2,14 @@
 
 a good listener.
 
-keys
+### keys
 K1 (Hold): alt
 K2: record/stop recording
 K3: pause/play (if material recorded)
 alt + K2: arm for recording when input threshold is met
 alt + K3: save loop (if material recorded)
 
-encoders
+### encoders
 E1: quantization (off, 1, 1/2, 1/4, 1/8, 1/16, 1/32)
 E2: shift loop start
 E3: shift loop end
