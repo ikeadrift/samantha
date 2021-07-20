@@ -12,6 +12,7 @@ local text_display = ''
 local start_time = nil
 local current_position = 0
 local q_div_table = {nil, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4}
+local q_beat_count = 0
 local max_len_table = {nil, 0.5, 1, 2, 4, 6, 8}
 local max_len = nil
 local active_control_level = 3
@@ -64,6 +65,7 @@ local function stop_recording()
 	if params:get("monitor_while_looping") == 1 then
 		_norns.level_monitor(0)
 	end
+	quantize()
 end
 
 
@@ -75,6 +77,7 @@ local function load_sample(file)
   set_loop_start(0)
   set_loop_end(sample_len)
 	recorded = true
+	quantize()
 end
 
 
@@ -98,29 +101,6 @@ local function update_positions(voice,position)
 end
 
 
-local function quantize(s, e)
-	if params:get("quantize_div") ~= 1 then
-		local loop_start = params:get("loop_start")
-		-- local loop_len = params:get("loop_end") - loop_start
-		local loop_len = e - s
-		local q_beat_len = clock.get_beat_sec() * params:get("quantize_div")
-		local q_beat_count = loop_len // q_beat_len
-		
-		if math.abs(loop_len - (q_beat_len * q_beat_count)) > math.abs(loop_len - (q_beat_len * (q_beat_count + 1) )) then
-			q_beat_count = q_beat_count + 1
-		end
-
-		if q_beat_count~=0 then
-			params:set("loop_end", loop_start + (q_beat_len * q_beat_count))
-			quantized_time = util.time()
-		else
-			print("loop too short for quantization settings")
-			quantized_err_time = util.time()
-		end
-	end
-end
-
-
 function increment_name(name)
 	local n = name:find("%-%d+$")
 	if n then
@@ -128,6 +108,44 @@ function increment_name(name)
 	else
 		return ''
 	end
+end
+
+function calculate_beat_count()
+  local loop_start = params:get("loop_start")
+	local loop_len = params:get("loop_end") - loop_start
+	local q_beat_len = clock.get_beat_sec() * q_div_table[params:get("q_div")]
+	q_beat_count = loop_len // q_beat_len
+end
+
+
+-- todo: use the above function inside of this function
+function quantize()
+  if params:get("q_div") ~= 1 then
+    
+    local loop_start = params:get("loop_start")
+		local loop_len = params:get("loop_end") - loop_start
+		local q_beat_len = clock.get_beat_sec() * q_div_table[params:get("q_div")]
+		q_beat_count = loop_len // q_beat_len
+		
+		-- if math.abs(loop_len - (q_beat_len * q_beat_count)) > math.abs(loop_len - (q_beat_len * (q_beat_count + 1) )) then
+		-- 	q_beat_count = q_beat_count + 1
+		-- end
+
+		if q_beat_count~=0 then
+			params:set("loop_end", loop_start + (q_beat_len * q_beat_count))
+			-- quantized_time = util.time()
+		else
+		  q_beat_count = q_beat_count + 1
+		  params:set("loop_end", loop_start + (q_beat_len * q_beat_count))
+			print("loop too short for quantization settings")
+			-- quantized_err_time = util.time()
+		end
+    loop_end_cs.step = clock.get_beat_sec() * q_div_table[params:get("q_div")]  
+    loop_start_cs.step = clock.get_beat_sec() * q_div_table[params:get("q_div")]  
+  else
+    loop_end_cs.step = 0.01  
+    loop_start_cs.step = 0.01
+  end
 end
 
 
@@ -172,17 +190,20 @@ function init()
   params:add_file("sample", "sample")
   params:set_action("sample", function(file) load_sample(file) end)
   -- sample start controls
-  params:add_control("loop_start", "loop start", controlspec.new(0.0, 349.99, "lin", .01, 0, "secs"))
-  params:set_action("loop_start", function(x) set_loop_start(x) end)
+  loop_start_cs = controlspec.new(0.0, 349.99, "lin", .01, 0, "secs")
+  params:add_control("loop_start", "loop start", loop_start_cs)
+  params:set_action("loop_start", function(x) set_loop_start(x) calculate_beat_count() end)
   -- sample end controls
-  params:add_control("loop_end", "loop end", controlspec.new(.01, 350, "lin", .01, 350, "secs"))
-  params:set_action("loop_end", function(x) set_loop_end(x) end)
+  
+  loop_end_cs = controlspec.new(.01, 350, "lin", .01, 350, "secs")
+  params:add_control("loop_end", "loop end", loop_end_cs)
+  params:set_action("loop_end", function(x) set_loop_end(x) calculate_beat_count() end)
 	-- line thru
 	params:add_option("monitor_while_looping", "always monitor", {"off", "on"}, 1)
 	
   -- quantize
   params:add_option('q_div', 'q div', {'off', '1/32', '1/16', '1/8', '1/4', '1/2', '1', '2', '4'}, 5)
-  -- params:set_action("q_div", function(x) quantize(x) end)
+  params:set_action("q_div", function() quantize() end)
 
   -- max length
   params:add_option('auto_len', "auto length", {'off', '1/2', '1', '2', '4', '8'}, 1)
@@ -353,7 +374,7 @@ function redraw()
   screen.rect(56, 14, 17, 17)
   screen.stroke()
   
-   
+  
   if recording or primed or not recorded then
     if recording then
       screen.level(15)
@@ -424,9 +445,9 @@ function redraw()
   if not recorded then
     screen.text_center("-")
   elseif recording then
-    screen.text_center("end : " .. string.format("%.2f", current_position))
+    screen.text_center(string.format("%.2f", current_position) .. "s")
   else
-    screen.text_center(params:get("loop_end") - params:get("loop_start"))
+    screen.text_center(params:get("loop_end") - params:get("loop_start").. "s")
   end
   
 
@@ -436,11 +457,11 @@ function redraw()
     screen.text_center("-")
   elseif recording then
     -- quantize this
-    screen.text_center("Q end : " .. string.format("%.2f", current_position))
+    screen.text_center(string.format("%.0f", (params:get("loop_end") - params:get("loop_start")) // clock.get_beat_sec() * q_div_table[params:get("q_div")]))
   else
     if params:get("q_div") ~= 1 then
       -- do the math to display correct length
-      screen.text_center("Q math")
+      screen.text_center(string.format("%.0f", q_beat_count))  
     else
       screen.text_center("-")
     end
@@ -498,25 +519,22 @@ function redraw()
   if alt then
     screen.level(15)
     screen.text(string.format("%.2f", params:get("input_trigger_amp")))
-    screen.move(128 - screen_x_padding, 51)
-      screen.text_right(params:string("auto_len"))
+    screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
+    screen.text_right(params:string("auto_len"))
   else
-    if recording or recorded then
-      screen.level(15)
-      screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
-      screen.move(128 - screen_x_padding, 51)
-      if recording then
-        screen.text_right(string.format("%.2f", string.format("%.2f", current_position)) .. " ◣")
-      else
-        screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◣")
-      end
-    else
+    if not recorded or recording then
       screen.level(3)
       screen.text("◢ -")
-     screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
-     screen.text_right("- ◣")
+      screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
+      screen.text_right("- ◣")
+    else
+      screen.level(15)
+      screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
+      screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
+      screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◣")
     end
   end
+    
   
   screen.move(64, 54)
   screen.level(4)
