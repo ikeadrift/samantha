@@ -454,7 +454,6 @@ function redraw()
     screen.text_center("-")
   else
     if params:get("q_div") ~= 1 then
-      -- do the math to display correct length
       screen.text_center(string.format("%.0f", q_beat_count))  
     else
       screen.text_center("-")
@@ -469,7 +468,6 @@ function redraw()
   else
     if alt then
       screen.text("ARM")
-      -- screen.text("Q " .. params:get("clock_tempo") .. "/" .. params:get("quantize_div"))
     elseif primed then
       if primed_flash then
         screen.level(15)
@@ -524,9 +522,9 @@ function redraw()
     else
       if q_div_table[params:get("q_div")] then
         screen.level(15)
-        screen.text(string.format("%.0f", params:get("loop_start") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
+        screen.text("◢ " .. string.format("%.0f", params:get("loop_start") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
         screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
-        screen.text_right(string.format("%.0f", params:get("loop_end") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
+        screen.text_right(string.format("%.0f", params:get("loop_end") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])) .. " ◣")
       else
         screen.level(15)
         screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
