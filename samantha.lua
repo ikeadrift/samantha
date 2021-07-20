@@ -1,3 +1,5 @@
+-- samantha says hello
+
 local te = require 'textentry'
 local screen_dirty = true
 local alt = false
@@ -186,7 +188,7 @@ function init()
 			primed = false
 		end
 	end
-	p_input_level.time = 0.0001
+	p_input_level.time = 0.02
 
   -- load a sample
   params:add_file("sample", "sample")
@@ -231,7 +233,7 @@ function init()
   -- auto len metro
   auto_len_timer = metro.init()
   auto_len_timer.time = clock.get_beat_sec()/32
-  auto_len_timer.event = function() if current_position >= (clock.get_beat_sec() * auto_len_table[params:get("auto_len")]) then stop_recording() auto_len_timer:stop() end end
+  auto_len_timer.event = function() if current_position > (clock.get_beat_sec() * auto_len_table[params:get("auto_len")]) then stop_recording() auto_len_timer:stop() end end
   
   
   -- local screen_refresh_metro = metro.init()
