@@ -5,7 +5,6 @@ local recorded = false
 local primed = false
 local primed_flash = false
 local recording = false
-local quantized = true
 local playing = false
 local text_display_time = 2.0
 local text_display = ''
@@ -13,8 +12,7 @@ local start_time = nil
 local current_position = 0
 local q_div_table = {nil, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4}
 local q_beat_count = 0
-local max_len_table = {nil, 0.5, 1, 2, 4, 6, 8}
-local max_len = nil
+local auto_len_table = {nil, 2, 4, 8, 16, 24, 32}
 local active_control_level = 3
 local last_saved_name = ''
 
@@ -51,6 +49,9 @@ local function start_recording()
 	recording = true
 	start_time = util.time()
 	_norns.level_monitor(1)
+	if params:get("auto_len") ~= 1 then
+	  auto_len_timer:start()
+	end
 end
 
 
@@ -109,6 +110,7 @@ function increment_name(name)
 		return ''
 	end
 end
+
 
 function calculate_beat_count()
   local loop_start = params:get("loop_start")
@@ -210,19 +212,8 @@ function init()
   -- params:set_action("auto_len", function(x) set_max_len(x) end)
 
   -- input trigger db
-  local max_len_cs = controlspec.def{
-    min=0.00,
-    max=5.0,
-    warp='lin',
-    step=0.01, -- calc real time chunks based on quantize setting and bpm
-    default=0,
-    quantum=0,
-    wrap=false,
-    units='sec'
-  }
-  
   local amp_cs = controlspec.AMP
-  amp_cs.default = 0.5
+  amp_cs.default = 0.25
   params:add_control("input_trigger_amp","input trigger",amp_cs)
 
 
@@ -236,6 +227,11 @@ function init()
   armed_timer = metro.init()
   armed_timer.time = 1/2.5
   armed_timer.event = function() primed_flash = not primed_flash end
+  
+  -- auto len metro
+  auto_len_timer = metro.init()
+  auto_len_timer.time = clock.get_beat_sec()/32
+  auto_len_timer.event = function() if current_position >= (clock.get_beat_sec() * auto_len_table[params:get("auto_len")]) then stop_recording() auto_len_timer:stop() end end
   
   
   -- local screen_refresh_metro = metro.init()
@@ -429,7 +425,6 @@ function redraw()
     screen.line(64-3, 26)
     screen.close()
     screen.fill()
-    -- screen.text_center("▶")
   end
   
   if recorded and not playing and not primed then
@@ -437,12 +432,11 @@ function redraw()
     screen.fill()
     screen.rect(64+1, 18, 2, 8)
     screen.fill()
-    -- screen.text_center("||")
   end
 
   screen.level(3)
   screen.move(64, screen_y_centered + 21)
-  if not recorded then
+  if not recorded and not recording then
     screen.text_center("-")
   elseif recording then
     screen.text_center(string.format("%.2f", current_position) .. "s")
@@ -450,14 +444,12 @@ function redraw()
     screen.text_center(params:get("loop_end") - params:get("loop_start").. "s")
   end
   
-
   
   screen.move(64, screen_y_centered + 21 + 9)
-  if not recorded or not quantized then
+  if recording then
+    screen.text_center(string.format("%.0f", current_position // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
+  elseif not recorded or not q_div_table[params:get("q_div")] then
     screen.text_center("-")
-  elseif recording then
-    -- quantize this
-    screen.text_center(string.format("%.0f", (params:get("loop_end") - params:get("loop_start")) // clock.get_beat_sec() * q_div_table[params:get("q_div")]))
   else
     if params:get("q_div") ~= 1 then
       -- do the math to display correct length
@@ -528,10 +520,17 @@ function redraw()
       screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
       screen.text_right("- ◣")
     else
-      screen.level(15)
-      screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
-      screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
-      screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◣")
+      if q_div_table[params:get("q_div")] then
+        screen.level(15)
+        screen.text(string.format("%.0f", params:get("loop_start") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
+        screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
+        screen.text_right(string.format("%.0f", params:get("loop_end") // (clock.get_beat_sec() * q_div_table[params:get("q_div")])))
+      else
+        screen.level(15)
+        screen.text("◢ " .. string.format("%.2f", params:get("loop_start")))
+        screen.move(128 - screen_x_padding, 64 - screen_y_padding - 9)
+        screen.text_right(string.format("%.2f", params:get("loop_end")) .. " ◣")
+      end
     end
   end
     
